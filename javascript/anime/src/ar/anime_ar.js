@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isMFn": false,
-  "version": "0.0.4",
+  "version": "0.0.5",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "anime/src/ar/anime_ar.js"
@@ -53,38 +53,68 @@ class DefaultExtension extends MProvider {
     return node ? (node.attr(attr) || "").trim() : "";
   }
 
-  parseAnchors(doc) {
-    const anchors = doc.select("a");
-    const list = [];
-    for (const a of anchors) {
-      const href = this.absoluteUrl(a.attr("href") || "");
-      const text = a.text().trim();
-      list.push({ href, text, el: a });
-    }
-    return list;
+  cleanName(name) {
+    return (name || "")
+      .replace(/\s+/g, " ")
+      .replace(/^#+\s*/, "")
+      .trim();
   }
 
-  parseAnimeListPage(doc) {
+  parseAllAnchors(doc) {
+    const anchors = doc.select("a");
+    const results = [];
+
+    for (const a of anchors) {
+      const href = this.absoluteUrl(a.attr("href") || "");
+      const text = this.cleanName(a.text());
+      const title = this.cleanName(a.attr("title") || "");
+      const img = a.selectFirst("img");
+
+      const imageUrl = img
+        ? this.absoluteUrl(
+            img.attr("data-src") ||
+            img.attr("data-lazy-src") ||
+            img.attr("data-original") ||
+            img.attr("src") ||
+            ""
+          )
+        : "";
+
+      results.push({
+        href,
+        text,
+        title,
+        imageUrl,
+        className: a.attr("class") || ""
+      });
+    }
+
+    return results;
+  }
+
+  parsePopularFromAnimePage(doc) {
     const list = [];
     const seen = new Set();
-    const anchors = this.parseAnchors(doc);
+    const anchors = this.parseAllAnchors(doc);
 
     for (const item of anchors) {
       const href = item.href;
-      const name = item.text;
+      const name = item.title || item.text;
 
+      if (!href) continue;
       if (!href.includes("/anime/")) continue;
       if (href.includes("/anime-status/")) continue;
       if (href.includes("/anime-type/")) continue;
       if (href.includes("/anime-season/")) continue;
       if (href.includes("/anime-genre/")) continue;
+      if (href.includes("/episode/")) continue;
       if (!name || name.length < 2) continue;
       if (seen.has(href)) continue;
 
       seen.add(href);
       list.push({
         name,
-        imageUrl: "",
+        imageUrl: item.imageUrl,
         link: this.normalizeLink(href)
       });
     }
@@ -92,57 +122,50 @@ class DefaultExtension extends MProvider {
     return list;
   }
 
-  parseEpisodePairs(doc, headerTitle) {
-    const lines = doc.select("h3, a");
+  parseLatestFromHome(doc) {
     const list = [];
     const seen = new Set();
-    let inSection = false;
-    let pendingEpisode = null;
+    const anchors = this.parseAllAnchors(doc);
 
-    for (const node of lines) {
-      const text = node.text().trim();
-      const href = node.tagName && node.tagName() === "a"
-        ? this.absoluteUrl(node.attr("href") || "")
-        : "";
+    for (const item of anchors) {
+      if (!item.href) continue;
+      if (!item.href.includes("/episode/")) continue;
+      if (item.className.includes("see-all")) continue;
 
-      if (text === headerTitle) {
-        inSection = true;
-        pendingEpisode = null;
-        continue;
-      }
+      const name = item.title || item.text;
+      if (!name || name.length < 2) continue;
+      if (seen.has(item.href)) continue;
 
-      if (!inSection) continue;
+      seen.add(item.href);
+      list.push({
+        name,
+        imageUrl: item.imageUrl,
+        link: this.normalizeLink(item.href)
+      });
+    }
 
-      if (text.startsWith("###")) continue;
-      if (text === "المزيد من الحلقات") continue;
-      if (
-        text === "أكثر أنميات الموسم مشاهدة" ||
-        text === "آخر الحلقات المضافة" ||
-        text === "آخر الأنميات المضافة" ||
-        text === "الأنميات المثبتة"
-      ) {
-        break;
-      }
+    return list;
+  }
 
-      if (href.includes("/episode/") && text.includes("الحلقة")) {
-        pendingEpisode = {
-          episodeName: text,
-          episodeLink: href
-        };
-        continue;
-      }
+  parseLatestFromEpisodePage(doc) {
+    const list = [];
+    const seen = new Set();
+    const anchors = this.parseAllAnchors(doc);
 
-      if (pendingEpisode && href.includes("/anime/")) {
-        if (!seen.has(pendingEpisode.episodeLink)) {
-          seen.add(pendingEpisode.episodeLink);
-          list.push({
-            name: `${text} - ${pendingEpisode.episodeName}`,
-            imageUrl: "",
-            link: this.normalizeLink(pendingEpisode.episodeLink)
-          });
-        }
-        pendingEpisode = null;
-      }
+    for (const item of anchors) {
+      if (!item.href) continue;
+      if (!item.href.includes("/episode/")) continue;
+
+      const name = item.title || item.text;
+      if (!name || name.length < 2) continue;
+      if (seen.has(item.href)) continue;
+
+      seen.add(item.href);
+      list.push({
+        name,
+        imageUrl: item.imageUrl,
+        link: this.normalizeLink(item.href)
+      });
     }
 
     return list;
@@ -154,7 +177,7 @@ class DefaultExtension extends MProvider {
       : `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
 
     const doc = await this.request(url);
-    const list = this.parseAnimeListPage(doc);
+    const list = this.parsePopularFromAnimePage(doc);
 
     return {
       list,
@@ -170,12 +193,12 @@ class DefaultExtension extends MProvider {
       };
     }
 
-    const doc = await this.request(this.baseUrl);
-    let list = this.parseEpisodePairs(doc, "حلقات الأنمي المثبتة");
+    const homeDoc = await this.request(this.baseUrl);
+    let list = this.parseLatestFromHome(homeDoc);
 
     if (list.length === 0) {
       const episodeDoc = await this.request(`${this.baseUrl}/episode/`);
-      list = this.parseEpisodePairs(episodeDoc, "أرشيف حلقات الأنمي");
+      list = this.parseLatestFromEpisodePage(episodeDoc);
     }
 
     return {
@@ -187,7 +210,7 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const url = `${this.baseUrl}/?search_param=animes&s=${encodeURIComponent(query)}`;
     const doc = await this.request(url);
-    const list = this.parseAnimeListPage(doc).filter(item =>
+    const list = this.parsePopularFromAnimePage(doc).filter(item =>
       item.name.toLowerCase().includes(query.toLowerCase())
     );
 
