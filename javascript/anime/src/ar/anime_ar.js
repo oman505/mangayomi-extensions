@@ -171,7 +171,7 @@ class DefaultExtension extends MProvider {
     return list;
   }
 
-  async getPopular(page) {
+    async getPopular(page) {
     const url = page === 1
       ? `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/`
       : `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
@@ -184,7 +184,7 @@ class DefaultExtension extends MProvider {
       hasNextPage: doc.selectFirst(`a[href*="/page/${page + 1}/"]`) != null
     };
   }
-
+  
   async getLatestUpdates(page) {
     if (page !== 1) {
       return {
