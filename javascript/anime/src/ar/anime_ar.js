@@ -35,7 +35,7 @@ class DefaultExtension extends MProvider {
   }
 
   async getPopular(page) {
-    const url = `${this.baseUrl}/anime-type/tv2/page-${page}`;
+      const url = page === 1 ? this.baseUrl : `${this.baseUrl}/page/${page}`;
     const doc = await this.request(url);
     const list = this.parseAnimeCards(doc);
     const nextPage = doc.selectFirst("a.next,page-numbers") !== null;
@@ -43,7 +43,12 @@ class DefaultExtension extends MProvider {
   }
 
   async getLatestUpdates(page) {
-    // ... implementation
+    
+      const url = `${this.baseUrl}/episode/page/${page}`;
+  const doc = await this.request(url);
+  const list = this.parseAnimeCards(doc);
+  const nextPage = doc.selectFirst("a.next,page-numbers") !== null;
+  return { list, hasNextPage: nextPage };
   }
 
   async search(query, page, filters) {
