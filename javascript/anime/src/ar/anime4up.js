@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isNsfw": false,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "javascript/anime/src/ar/anime4up.js"
@@ -37,22 +37,18 @@ class DefaultExtension extends MProvider {
       "";
   }
 
-  // Convert episode URL to anime URL
   episodeUrlToAnimeUrl(epUrl) {
     try {
       let path = epUrl.replace(/^https?:\/\/[^/]+/, "");
       let slug = path.replace(/^\/episode\//, "").replace(/\/$/, "");
       try { slug = decodeURIComponent(slug); } catch(e) {}
-      // Strip optional Arabic prefix: \u0627\u0646\u0645\u064a- or \u0641\u064a\u0644\u0645-
-      slug = slug.replace(/^\u0627\u0646\u0645\u064a-/, "").replace(/^\u0641\u064a\u0644\u0645-/, "");
-      // Strip Arabic episode suffix: everything from first Arabic char sequence
-      slug = slug.replace(/-[\u0600-\u06ff].*$/, "");
+      slug = slug.replace(/^انمي-/, "").replace(/^فيلم-/, "");
+      slug = slug.replace(/-[؀-ۿ].*$/, "");
       if (slug) return `${this.baseUrl}/anime/${slug}/`;
     } catch(e) {}
     return null;
   }
 
-  // Parse anime cards from popular/search pages (links to /anime/)
   parseAnimeCards(doc) {
     const list = [];
     const seen = new Set();
@@ -80,8 +76,6 @@ class DefaultExtension extends MProvider {
   }
 
   async getLatestUpdates(page) {
-    // Page 1: scrape home page "\u0623\u062e\u0631 \u0627\u0644\u062d\u0644\u0642\u0627\u062a \u0627\u0644\u0645\u0636\u0627\u0641\u0629" section
-    // Page 2+: fall back to /episode/page/N/ archive
     const url = page === 1
       ? `${this.baseUrl}/home8/`
       : `${this.baseUrl}/episode/page/${page}/`;
@@ -90,13 +84,8 @@ class DefaultExtension extends MProvider {
     const seenAnimeUrls = new Set();
 
     if (page === 1) {
-      // Each card has:
-      // <a href="/episode/..."><img ...><span>TV</span>...</a>   <- image link
-      // <a href="/episode/..."><h2>Title</h2></a>                <- title link
-      // Strategy: iterate title links (those with h2/h3 inside), get img from preceding sibling
       const epLinks = doc.select("a[href*='/episode/']");
       for (const a of epLinks) {
-        // Only process links that directly contain an img (image card links)
         const img = a.selectFirst("img");
         if (!img) continue;
         const epUrl = a.attr("href") || "";
@@ -105,16 +94,12 @@ class DefaultExtension extends MProvider {
         if (!animeUrl || seenAnimeUrls.has(animeUrl)) continue;
         seenAnimeUrls.add(animeUrl);
         const imageUrl = this.getImageUrl(img);
-        // Get title: find a sibling/nearby link with same href that has a heading
         const titleLink = doc.selectFirst(`a[href='${epUrl}'] h2, a[href='${epUrl}'] h3, a[href='${encodeURI(epUrl)}'] h2, a[href='${encodeURI(epUrl)}'] h3`);
-        const title = titleLink
-          ? titleLink.text.trim()
-          : (img.attr("alt") || "");
+        const title = titleLink ? titleLink.text.trim() : (img.attr("alt") || "");
         if (!title) continue;
         list.push({ name: title, imageUrl, link: animeUrl });
       }
     } else {
-      // /episode/page/N/: find heading links to /anime/
       const headings = doc.select("h2 a[href*='/anime/'], h3 a[href*='/anime/']");
       for (const headingLink of headings) {
         const animeUrl = headingLink.attr("href") || "";
@@ -167,7 +152,7 @@ class DefaultExtension extends MProvider {
       const epText = ep.text?.trim() || ep.selectFirst("h3, span")?.text?.trim() || "";
       const epNumMatch = epText.match(/(\d+(\.\d+)?)/);
       const num = epNumMatch ? parseFloat(epNumMatch[1]) : episodes.length + 1;
-      episodes.push({ name: `\u0627\u0644\u062d\u0644\u0642\u0629 ${num}`, url: epLink, num, scanlator: "" });
+      episodes.push({ name: "الحلقة " + num, url: epLink, num, scanlator: "" });
     }
     return { name: title, imageUrl, description, genre, status, episodes };
   }
@@ -175,8 +160,8 @@ class DefaultExtension extends MProvider {
   parseStatus(text) {
     if (!text) return 0;
     const t = text.toLowerCase();
-    if (t.includes("\u0645\u0643\u062a\u0645\u0644") || t.includes("completed")) return 1;
-    if (t.includes("\u064a\u0639\u0631\u0636") || t.includes("ongoing")) return 2;
+    if (t.includes("مكتمل") || t.includes("completed")) return 1;
+    if (t.includes("يعرض") || t.includes("ongoing")) return 2;
     return 0;
   }
 
@@ -216,7 +201,7 @@ class DefaultExtension extends MProvider {
     return [{
       key: "preferred_quality",
       listPreference: {
-        title: "\u062c\u0648\u062f\u0629 \u0627\u0644\u0641\u064a\u062f\u064a\u0648 \u0627\u0644\u0645\u0641\u0636\u0644\u0629",
+        title: "جودة الفيديو المفضلة",
         summary: "",
         valueIndex: 0,
         entries: ["FHD 1080p", "HD 720p", "SD 480p"],
