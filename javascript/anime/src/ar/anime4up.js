@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isNsfw": false,
-  "version": "0.1.2",
+  "version": "0.1.3",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "javascript/anime/src/ar/anime4up.js"
@@ -17,26 +17,21 @@ class DefaultExtension extends MProvider {
   get baseUrl() {
     return this.source.baseUrl;
   }
-
   get headers() {
     return { "Referer": this.baseUrl };
   }
-
   async request(url) {
     const res = await new Client().get(url, this.headers);
     return new Document(res.body);
   }
-
   getImageUrl(img) {
     if (!img) return "";
     return img.getSrc ||
       img.attr("data-src") ||
       img.attr("data-lazy-src") ||
       img.attr("data-original") ||
-      img.attr("src") ||
-      "";
+      img.attr("src") || "";
   }
-
   episodeUrlToAnimeUrl(epUrl) {
     try {
       let path = epUrl.replace(/^https?:\/\/[^/]+/, "");
@@ -48,25 +43,22 @@ class DefaultExtension extends MProvider {
     } catch(e) {}
     return null;
   }
-
   parseAnimeCards(doc) {
     const list = [];
     const seen = new Set();
-    const imgLinks = doc.select("a[href*='/anime/']");
-    for (const a of imgLinks) {
+    for (const a of doc.select("a[href*='/anime/']")) {
       const link = a.attr("href") || "";
       if (!link.includes("/anime/") || seen.has(link)) continue;
       const img = a.selectFirst("img");
       if (!img) continue;
       seen.add(link);
       const imageUrl = this.getImageUrl(img);
-      const headingLink = doc.selectFirst(`h2 a[href='${link}'], h3 a[href='${link}'], h1 a[href='${link}']`);
-      const title = headingLink ? headingLink.text.trim() : (img.attr("alt") || "");
+      const hl = doc.selectFirst(`h2 a[href='${link}'], h3 a[href='${link}'], h1 a[href='${link}']`);
+      const title = hl ? hl.text.trim() : (img.attr("alt") || "");
       if (title) list.push({ name: title, imageUrl, link });
     }
     return list;
   }
-
   async getPopular(page) {
     const url = `${this.baseUrl}/%d9%82%d8%a7%d8%a6%d9%85%d8%a9-%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a/page/${page}/`;
     const doc = await this.request(url);
@@ -74,129 +66,145 @@ class DefaultExtension extends MProvider {
     const hasNextPage = !!doc.selectFirst("a.next, a[rel='next'], .page-numbers .next");
     return { list, hasNextPage };
   }
-
   async getLatestUpdates(page) {
     const url = page === 1
       ? `${this.baseUrl}/home8/`
       : `${this.baseUrl}/episode/page/${page}/`;
     const doc = await this.request(url);
     const list = [];
-    const seenAnimeUrls = new Set();
-
+    const seen = new Set();
     if (page === 1) {
-      const epLinks = doc.select("a[href*='/episode/']");
-      for (const a of epLinks) {
+      for (const a of doc.select("a[href*='/episode/']")) {
         const img = a.selectFirst("img");
         if (!img) continue;
         const epUrl = a.attr("href") || "";
         if (!epUrl.includes("/episode/")) continue;
         const animeUrl = this.episodeUrlToAnimeUrl(epUrl);
-        if (!animeUrl || seenAnimeUrls.has(animeUrl)) continue;
-        seenAnimeUrls.add(animeUrl);
+        if (!animeUrl || seen.has(animeUrl)) continue;
+        seen.add(animeUrl);
         const imageUrl = this.getImageUrl(img);
-        const titleLink = doc.selectFirst(`a[href='${epUrl}'] h2, a[href='${epUrl}'] h3, a[href='${encodeURI(epUrl)}'] h2, a[href='${encodeURI(epUrl)}'] h3`);
-        const title = titleLink ? titleLink.text.trim() : (img.attr("alt") || "");
+        const tl = doc.selectFirst(`a[href='${epUrl}'] h2, a[href='${epUrl}'] h3, a[href='${encodeURI(epUrl)}'] h2, a[href='${encodeURI(epUrl)}'] h3`);
+        const title = tl ? tl.text.trim() : (img.attr("alt") || "");
         if (!title) continue;
         list.push({ name: title, imageUrl, link: animeUrl });
       }
     } else {
-      const headings = doc.select("h2 a[href*='/anime/'], h3 a[href*='/anime/']");
-      for (const headingLink of headings) {
-        const animeUrl = headingLink.attr("href") || "";
-        if (!animeUrl.includes("/anime/") || seenAnimeUrls.has(animeUrl)) continue;
-        seenAnimeUrls.add(animeUrl);
-        const title = headingLink.text.trim();
+      for (const hl of doc.select("h2 a[href*='/anime/'], h3 a[href*='/anime/']")) {
+        const animeUrl = hl.attr("href") || "";
+        if (!animeUrl.includes("/anime/") || seen.has(animeUrl)) continue;
+        seen.add(animeUrl);
+        const title = hl.text.trim();
         if (!title) continue;
         const img = doc.selectFirst(`img[alt='${title}']`);
-        const imageUrl = img ? this.getImageUrl(img) : "";
-        list.push({ name: title, imageUrl, link: animeUrl });
+        list.push({ name: title, imageUrl: img ? this.getImageUrl(img) : "", link: animeUrl });
       }
     }
-
     const hasNextPage = page === 1 ? true : !!doc.selectFirst("a.next, a[rel='next'], .page-numbers .next");
     return { list, hasNextPage };
   }
-
   async search(query, page, filters) {
     const url = `${this.baseUrl}/?s=${encodeURIComponent(query)}&page=${page}`;
     const doc = await this.request(url);
-    const list = this.parseAnimeCards(doc);
-    const hasNextPage = !!doc.selectFirst("a.next, a[rel='next']");
-    return { list, hasNextPage };
+    return { list: this.parseAnimeCards(doc), hasNextPage: !!doc.selectFirst("a.next, a[rel='next']") };
   }
-
   async getDetail(url) {
     const doc = await this.request(url);
-    const title = doc.selectFirst("h1")?.text?.trim() || doc.selectFirst("h2")?.text?.trim() || "";
+    const title = doc.selectFirst("h1")?.text?.trim() || "";
     let imageUrl = "";
-    const imgSelectors = ["img.thumbnail", "div.anime-thumbnail img", ".anime-details img", ".anime-cover img", "img[alt]"];
-    for (const sel of imgSelectors) {
+    for (const sel of ["img.thumbnail", ".anime-details img", ".anime-cover img", "img[alt]", "img"]) {
       const img = doc.selectFirst(sel);
-      if (img) {
-        imageUrl = this.getImageUrl(img);
-        if (imageUrl) break;
-      }
+      if (img) { imageUrl = this.getImageUrl(img); if (imageUrl) break; }
     }
-    const description = doc.selectFirst("p.anime-story, div.anime-story, .story, p.story")?.text?.trim() || "";
-    const genreEls = doc.select(".anime-genres a, .genres a, div[class*='genre'] a");
-    const genre = genreEls.map(el => el.text.trim()).filter(Boolean);
-    const rawStatus = doc.selectFirst(".anime-info .status, span.status, .anime-status")?.text?.trim() || "";
+    const description = doc.selectFirst("p.anime-story, div.anime-story, .story")?.text?.trim() || "";
+    const genre = doc.select(".anime-genres a, .genres a").map(e => e.text.trim()).filter(Boolean);
+    const rawStatus = doc.selectFirst(".anime-info .status, span.status")?.text?.trim() || "";
     const status = this.parseStatus(rawStatus);
     const episodes = [];
     const seen = new Set();
-    const epLinks = doc.select("#episodesList a[href], .episodes-list a[href], ul.episodes a[href]");
-    for (const ep of epLinks) {
+    for (const ep of doc.select("#episodesList a[href], .episodes-list a[href], ul.episodes a[href]")) {
       const epLink = ep.attr("href") || "";
       if (!epLink || seen.has(epLink)) continue;
       seen.add(epLink);
-      const epText = ep.text?.trim() || ep.selectFirst("h3, span")?.text?.trim() || "";
-      const epNumMatch = epText.match(/(\d+(\.\d+)?)/);
-      const num = epNumMatch ? parseFloat(epNumMatch[1]) : episodes.length + 1;
+      const epText = ep.text?.trim() || "";
+      const m = epText.match(/(\d+(\.\d+)?)/);
+      const num = m ? parseFloat(m[1]) : episodes.length + 1;
       episodes.push({ name: "الحلقة " + num, url: epLink, num, scanlator: "" });
     }
     return { name: title, imageUrl, description, genre, status, episodes };
   }
-
-  parseStatus(text) {
-    if (!text) return 0;
-    const t = text.toLowerCase();
-    if (t.includes("مكتمل") || t.includes("completed")) return 1;
-    if (t.includes("يعرض") || t.includes("ongoing")) return 2;
+  parseStatus(t) {
+    if (!t) return 0;
+    const s = t.toLowerCase();
+    if (s.includes("مكتمل") || s.includes("completed")) return 1;
+    if (s.includes("يعرض") || s.includes("ongoing")) return 2;
     return 0;
   }
-
+  downloadToEmbed(rawUrl) {
+    try {
+      const u = rawUrl.trim();
+      const host = u.replace(/^https?:\/\//, "").split("/")[0].replace(/^www\./, "");
+      if (host.includes("megamax")) {
+        const id = u.split("/d/")[1] || u.split("/download/")[1] || "";
+        if (id) return `https://megamax.me/iframe/${id.replace(/\/$/, "")}`;
+      }
+      if (host.includes("streamruby")) {
+        const id = u.split("/d/")[1] || "";
+        if (id) return `https://streamruby.com/embed-${id.replace(/\/$/, "")}.html`;
+      }
+      if (host.includes("mp4upload")) {
+        const parts = u.replace(/\/$/, "").split("/");
+        const id = parts[parts.length - 1];
+        if (id) return `https://www.mp4upload.com/embed-${id}.html`;
+      }
+      if (host.includes("dsvplay") || host.includes("dood")) {
+        const id = u.split("/d/")[1] || "";
+        if (id) return `https://dsvplay.com/e/${id.replace(/\/$/, "")}`;
+      }
+      if (host.includes("voe.sx") || host.includes("voe")) {
+        const parts = u.replace(/\/$/, "").split("/");
+        const id = parts[parts.length - 1];
+        if (id) return `https://voe.sx/e/${id}`;
+      }
+      if (host.includes("uqload")) {
+        const parts = u.replace(/\/$/, "").split("/");
+        const id = parts[parts.length - 1];
+        if (id) return `https://uqload.co/embed-${id}.html`;
+      }
+      if (host.includes("videa")) {
+        return u;
+      }
+    } catch(e) {}
+    return null;
+  }
   async getVideoList(url) {
     const doc = await this.request(url);
     const videos = [];
-    const serverLinks = doc.select("ul.list-server-items li, .server-list li, li.server-item, li[data-id]");
-    for (const server of serverLinks) {
-      const dataId = server.attr("data-id") || server.attr("data-embed") || "";
-      const serverName = server.selectFirst("a, span")?.text?.trim() || server.text?.trim() || "Server";
-      if (dataId) videos.push({ url: dataId, quality: serverName, originalUrl: dataId });
-    }
-    if (videos.length === 0) {
-      const iframes = doc.select("iframe[src]");
-      for (const iframe of iframes) {
-        const src = iframe.attr("src") || "";
-        if (src) videos.push({ url: src, quality: "Default", originalUrl: src });
+    const rows = doc.select("#download tr, #download .table tr");
+    for (const row of rows) {
+      const linkEl = row.selectFirst("a[href]");
+      if (!linkEl) continue;
+      const rawUrl = linkEl.attr("href") || "";
+      if (!rawUrl) continue;
+      const cells = row.select("td");
+      const serverName = cells.length > 1 ? (cells[1].text?.trim() || "Server") : "Server";
+      const quality = cells.length > 2 ? (cells[2].text?.trim() || "") : "";
+      const label = quality ? `${serverName} [${quality}]` : serverName;
+      const embedUrl = this.downloadToEmbed(rawUrl);
+      if (embedUrl) {
+        videos.push({ url: embedUrl, quality: label, originalUrl: rawUrl });
       }
     }
     return this.sortVideos(videos);
   }
-
   sortVideos(videos) {
-    const preferences = new SharedPreferences();
-    const preferredQuality = preferences.get("preferred_quality") || "1080";
-    videos.sort((a, b) => {
-      const aMatch = a.quality.includes(preferredQuality) ? 1 : 0;
-      const bMatch = b.quality.includes(preferredQuality) ? 1 : 0;
-      return bMatch - aMatch;
+    const pref = new SharedPreferences().get("preferred_quality") || "1080";
+    return videos.sort((a, b) => {
+      const am = a.quality.includes(pref) ? 1 : 0;
+      const bm = b.quality.includes(pref) ? 1 : 0;
+      return bm - am;
     });
-    return videos;
   }
-
   getFilterList() { return []; }
-
   getSourcePreferences() {
     return [{
       key: "preferred_quality",
