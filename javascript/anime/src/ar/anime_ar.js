@@ -10,7 +10,7 @@ const mangayomiSources = [{
   "version": "0.0.1",
   "dateFormat": "",
   "dateFormatLocale": "",
-  "pkgPath": "anime/src/aanime_ar.js"
+  "pkgPath": "anime/src/ar/anime_ar.js"
 }];
 
 class DefaultExtension extends MProvider {
@@ -24,89 +24,178 @@ class DefaultExtension extends MProvider {
   }
 
   headers() {
-    return { "Referer": this.baseUrl };
+    return {
+      "Referer": this.baseUrl,
+      "Origin": this.baseUrl,
+      "User-Agent": "Mozilla/5.0"
+    };
   }
 
-  parseAnimeCards(doc) {
+  absoluteUrl(url) {
+    if (!url) return "";
+    if (url.startsWith("http")) return url;
+    if (url.startsWith("//")) return `https:${url}`;
+    if (url.startsWith("/")) return `${this.baseUrl}${url}`;
+    return `${this.baseUrl}/${url}`;
+  }
+
+  normalizeLink(url) {
+    const full = this.absoluteUrl(url);
+    return full.replace(this.baseUrl, "");
+  }
+
+  parseAnimeCards(doc, options = {}) {
+    const { allowEpisodes = false } = options;
     const list = [];
-    const cards = doc.select("div.anime-card-container");
-    // ... parsing logic
+    const seen = new Set();
+
+    const selectors = [
+      "div.anime-card-container",
+      "div.col-lg-2",
+      "div.col-md-3",
+      "div.col-sm-3",
+      "article",
+      ".anime-card",
+      ".episodes-card-container",
+      ".episode-card"
+    ];
+
+    let cards = [];
+    for (const selector of selectors) {
+      const found = doc.select(selector);
+      if (found && found.length > 0) {
+        cards = found;
+        break;
+      }
+    }
+
+    for (const card of cards) {
+      const anchor =
+        card.selectFirst("a") ||
+        card.selectFirst("h3 a") ||
+        card.selectFirst(".anime-title a");
+
+      if (!anchor) continue;
+
+      const rawHref = anchor.attr("href") || "";
+      if (!rawHref) continue;
+
+      const href = this.absoluteUrl(rawHref);
+      if (!allowEpisodes && href.includes("/episode/")) continue;
+      if (seen.has(href)) continue;
+
+      const img =
+        card.selectFirst("img") ||
+        anchor.selectFirst("img");
+
+      const title =
+        anchor.attr("title") ||
+        (img ? img.attr("alt") : "") ||
+        (card.selectFirst(".anime-card-title") ? card.selectFirst(".anime-card-title").text() : "") ||
+        (card.selectFirst(".anime-title") ? card.selectFirst(".anime-title").text() : "") ||
+        (card.selectFirst("h3") ? card.selectFirst("h3").text() : "") ||
+        anchor.text() ||
+        card.text();
+
+      const imageUrl = img
+        ? (
+            img.attr("data-src") ||
+            img.attr("data-lazy-src") ||
+            img.attr("data-original") ||
+            img.attr("src") ||
+            ""
+          )
+        : "";
+
+      if (!title || title.trim() === "") continue;
+
+      seen.add(href);
+      list.push({
+        name: title.trim(),
+        imageUrl: this.absoluteUrl(imageUrl.trim()),
+        link: this.normalizeLink(href)
+      });
+    }
+
     return list;
   }
 
-  async function getPopular(page) {
-    // URL provided by you: https://witanime.you/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A3%D9%86%D9%85%D9%8A/page/1/
-    // We break down the encoded Arabic path, injecting the dynamic 'page' parameter 
-    const url = `https://witanime.you/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
-    
-    // Fetch the HTML document from the server
-    const response = await client.get(url);
-    const html = response.body;
+  async getPopular(page) {
+    const url = page === 1
+      ? `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/`
+      : `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
 
-    // Target the main Grid/Container containing the anime entries
-    const elements = document.select(html, "div.anime-list-content div.col-lg-2, div.anime-card-container"); 
-    const animeList = [];
+    const doc = await this.request(url);
+    const list = this.parseAnimeCards(doc, { allowEpisodes: false });
 
-    for (const element of elements) {
-        // Scrape individual attributes safely
-        const name = document.selectFirst(element, "h3 a, .anime-title").text;
-        const link = document.selectFirst(element, "a").attr("href");
-        const image = document.selectFirst(element, "img").attr("src");
-
-        animeList.push({
-            name: name.trim(),
-            link: link,
-            imageUrl: image
-        });
-    }
-
-    // Return the pagination check and the populated collection array
-    return {
-        list: animeList,
-        hasNextPage: animeList.length > 0 
-    };
-}
-
-async function getLatest(page) {
-    // URL provided by you: https://witanime.you/episode/page/1/
-    const url = `https://witanime.you/episode/page/${page}/`;
-    
-    // Fetch the raw response HTML 
-    const response = await client.get(url);
-    const html = response.body;
-
-    // Select the grids wrapping latest published episodes
-    const elements = document.select(html, "div.episodes-list-content div.col-lg-3, div.episode-card"); 
-    const latestList = [];
-
-    for (const element of elements) {
-        const name = document.selectFirst(element, "h3 a, .episode-title").text;
-        const link = document.selectFirst(element, "a").attr("href");
-        const image = document.selectFirst(element, "img").attr("src");
-
-        latestList.push({
-            name: name.trim(),
-            link: link,
-            imageUrl: image
-        });
-    }
+    const hasNextPage =
+      doc.selectFirst(`a[href*="/page/${page + 1}/"]`) != null ||
+      list.length > 0;
 
     return {
-        list: latestList,
-        hasNextPage: latestList.length > 0
+      list,
+      hasNextPage
     };
-}
+  }
+
+  async getLatest(page) {
+    const url = page === 1
+      ? `${this.baseUrl}/episode/`
+      : `${this.baseUrl}/episode/page/${page}/`;
+
+    const doc = await this.request(url);
+    const list = this.parseAnimeCards(doc, { allowEpisodes: true });
+
+    const hasNextPage =
+      doc.selectFirst(`a[href*="/episode/page/${page + 1}/"]`) != null ||
+      list.length > 0;
+
+    return {
+      list,
+      hasNextPage
+    };
+  }
 
   async search(query, page, filters) {
-    // ... implementation
+    const url = `${this.baseUrl}/?search_param=animes&s=${encodeURIComponent(query)}`;
+    const doc = await this.request(url);
+    const list = this.parseAnimeCards(doc, { allowEpisodes: false });
+
+    return {
+      list,
+      hasNextPage: false
+    };
   }
 
   async getDetail(url) {
-    // ... implementation
+    const doc = await this.request(this.absoluteUrl(url));
+
+    const title =
+      doc.selectFirst("h1")?.text() ||
+      doc.selectFirst("title")?.text() ||
+      "";
+
+    const image =
+      doc.selectFirst("img")?.attr("src") ||
+      doc.selectFirst("img")?.attr("data-src") ||
+      "";
+
+    const description =
+      doc.selectFirst(".anime-story")?.text() ||
+      doc.selectFirst(".story")?.text() ||
+      doc.selectFirst(".description")?.text() ||
+      "";
+
+    return {
+      name: title.trim(),
+      imageUrl: this.absoluteUrl(image),
+      description: description.trim(),
+      link: url
+    };
   }
 
   async getVideoList(url) {
-    // ... implementation with extractDirectVideo helper
+    return [];
   }
 
   getFilterList() {
