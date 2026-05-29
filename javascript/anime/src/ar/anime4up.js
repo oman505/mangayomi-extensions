@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isNsfw": false,
-  "version": "0.0.7",
+  "version": "0.0.8",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "javascript/anime/src/ar/anime4up.js"
@@ -27,54 +27,52 @@ class DefaultExtension extends MProvider {
     return new Document(res.body);
   }
 
-  // Convert episode URL slug to anime URL
-  // e.g. /episode/انمي-slug-الحلقة-9-مترجمة/ => /anime/slug/
+  // Get image URL: prefer data-src (lazy load), fallback to src
+  getImageUrl(img) {
+    if (!img) return "";
+    return img.getSrc ||
+           img.attr("data-src") ||
+           img.attr("data-lazy-src") ||
+           img.attr("data-original") ||
+           img.attr("src") ||
+           "";
+  }
+
+  // Convert episode URL to parent anime URL
   episodeUrlToAnimeUrl(epUrl) {
     try {
       let path = epUrl.replace(/^https?:\/\/[^/]+/, "");
-      // Remove /episode/ prefix and trailing slash
       let slug = path.replace(/^\/episode\//, "").replace(/\/$/, "");
-      // URL-decode
       try { slug = decodeURIComponent(slug); } catch(e) {}
-      // Strip Arabic prefix: انمي- or فيلم-
+      // Strip Arabic prefix: \u0627\u0646\u0645\u064a- or \u0641\u064a\u0644\u0645-
       slug = slug.replace(/^\u0627\u0646\u0645\u064a-/, "").replace(/^\u0641\u064a\u0644\u0645-/, "");
-      // Strip Arabic episode suffix: -الحلقة-N-... or -الاونا-N-... or similar
-      slug = slug.replace(/-[\u0600-\u06ff][\w\u0600-\u06ff\s]*$/, "");
+      // Strip Arabic episode suffix (everything after last latin segment)
+      slug = slug.replace(/-[\u0600-\u06ff][\s\S]*$/, "");
       if (slug) return `${this.baseUrl}/anime/${slug}/`;
     } catch(e) {}
     return null;
   }
 
-  // Parse anime cards from a page (for popular/search)
+  // Parse anime cards - structure: <a href=/anime/> (img) + <h2><a href=/anime/>Title</a></h2>
   parseAnimeCards(doc) {
     const list = [];
-    // Try multiple possible card containers
-    let cards = doc.select("div.anime-card-container");
-    if (cards.length === 0) cards = doc.select("div.anime-card-poster");
-    if (cards.length === 0) cards = doc.select("article.card");
-    if (cards.length === 0) cards = doc.select("div[class*='col'] a[href*='/anime/']");
-
-    if (cards.length > 0 && cards[0].tagName && cards[0].tagName.toLowerCase() === 'a') {
-      // Direct links
-      for (const a of cards) {
-        const link = a.attr("href") || "";
-        if (!link.includes("/anime/")) continue;
-        const img = a.selectFirst("img");
-        const imageUrl = img ? (img.getSrc || img.attr("src") || img.attr("data-src") || img.attr("data-lazy-src") || "") : "";
-        const title = (img ? img.attr("alt") : "") || a.text.trim() || "";
-        if (title) list.push({ name: title, imageUrl, link });
-      }
-      return list;
-    }
-
-    for (const card of cards) {
-      const a = card.selectFirst("a[href*='/anime/']") || card.selectFirst("a");
-      if (!a) continue;
+    // Each card: an image-link followed by a heading with the title
+    // Select all image links pointing to /anime/
+    const imgLinks = doc.select("a[href*='/anime/']");
+    const seen = new Set();
+    for (const a of imgLinks) {
       const link = a.attr("href") || "";
-      if (!link.includes("/anime/")) continue;
-      const img = card.selectFirst("img");
-      const imageUrl = img ? (img.getSrc || img.attr("src") || img.attr("data-src") || img.attr("data-lazy-src") || "") : "";
-      const title = (img ? img.attr("alt") : "") || a.text.trim() || card.selectFirst("h3, h2, h1")?.text?.trim() || "";
+      if (!link.includes("/anime/") || seen.has(link)) continue;
+      // Skip if this is a heading/text link (no img child)
+      const img = a.selectFirst("img");
+      if (!img) continue;
+      seen.add(link);
+      const imageUrl = this.getImageUrl(img);
+      // Title: find the nearest heading after this card
+      // The heading is a sibling or cousin element - try parent's next sibling heading
+      // Fallback: use img alt, but prefer heading text
+      const headingLink = doc.selectFirst(`h2 a[href='${link}'], h3 a[href='${link}'], h1 a[href='${link}']`);
+      const title = headingLink ? headingLink.text.trim() : (img.attr("alt") || "");
       if (title) list.push({ name: title, imageUrl, link });
     }
     return list;
@@ -84,27 +82,27 @@ class DefaultExtension extends MProvider {
     const url = `${this.baseUrl}/%d9%82%d8%a7%d8%a6%d9%85%d8%a9-%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a/page/${page}/`;
     const doc = await this.request(url);
     const list = this.parseAnimeCards(doc);
-    const hasNextPage = !!doc.selectFirst("a.next, a[rel='next']");
+    const hasNextPage = !!doc.selectFirst("a.next, a[rel='next'], .page-numbers .next");
     return { list, hasNextPage };
   }
 
   async getLatestUpdates(page) {
-    // /episode/ page shows episode cards with images
     const url = `${this.baseUrl}/episode/page/${page}/`;
     const doc = await this.request(url);
     const list = [];
     const seenAnimeUrls = new Set();
 
-    // Episode page cards: each card is an <a> linking to /episode/ containing <img>
-    // Try broad selector: any <a> with episode href containing an <img>
-    const links = doc.select("a[href*='/episode/']");
-    for (const a of links) {
+    // Each episode card: <a href=/episode/> containing <img> + heading with title
+    const imgLinks = doc.select("a[href*='/episode/']");
+    for (const a of imgLinks) {
       const epLink = a.attr("href") || "";
-      if (!epLink || !epLink.includes("/episode/")) continue;
+      if (!epLink.includes("/episode/")) continue;
       const img = a.selectFirst("img");
-      if (!img) continue; // skip text-only links
-      const imageUrl = img.getSrc || img.attr("src") || img.attr("data-src") || img.attr("data-lazy-src") || "";
-      const title = img.attr("alt") || a.selectFirst("h2, h3, .anime-card-title, .title")?.text?.trim() || a.text.trim() || "";
+      if (!img) continue;
+      const imageUrl = this.getImageUrl(img);
+      // Get title from heading inside the link
+      const titleEl = a.selectFirst("h2, h3, h1, .anime-card-title");
+      const title = titleEl ? titleEl.text.trim() : (img.attr("alt") || "");
       if (!title) continue;
       const animeUrl = this.episodeUrlToAnimeUrl(epLink);
       if (!animeUrl || seenAnimeUrls.has(animeUrl)) continue;
@@ -112,7 +110,7 @@ class DefaultExtension extends MProvider {
       list.push({ name: title, imageUrl, link: animeUrl });
     }
 
-    const hasNextPage = !!doc.selectFirst("a.next, a[rel='next']");
+    const hasNextPage = !!doc.selectFirst("a.next, a[rel='next'], .page-numbers .next");
     return { list, hasNextPage };
   }
 
@@ -133,7 +131,7 @@ class DefaultExtension extends MProvider {
     for (const sel of imgSelectors) {
       const img = doc.selectFirst(sel);
       if (img) {
-        imageUrl = img.getSrc || img.attr("src") || img.attr("data-src") || img.attr("data-lazy-src") || "";
+        imageUrl = this.getImageUrl(img);
         if (imageUrl) break;
       }
     }
