@@ -11,7 +11,7 @@
   "hasCloudflare": false,
   "sourceCodeUrl": "https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/ar/anime4up.js",
   "apiUrl": "",
-      "version": "0.0.9",
+        "version": "0.1.0",
   "isManga": false,
   "itemType": 1,
   "isFullData": false,
