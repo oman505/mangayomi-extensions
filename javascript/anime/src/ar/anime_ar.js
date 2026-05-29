@@ -10,7 +10,7 @@ const mangayomiSources = [{
   "version": "0.0.1",
   "dateFormat": "",
   "dateFormatLocale": "",
-  "pkgPath": "anime/src/ar/anime4up.js"
+  "pkgPath": "anime/src/aanime_ar.js"
 }];
 
 class DefaultExtension extends MProvider {
