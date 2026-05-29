@@ -2,11 +2,11 @@
 // Includes: WitAnime
 
 const mangayomiSources = [{
-  "name": "WitAnime",
+  "name": "anime_ar",
   "lang": "ar",
   "baseUrl": "https://witanime.you",
   "apiUrl": "",
-  "iconUrl": "https://witanime.you/wp-content/uploads/2023/05/favicon.ico",
+  "iconUrl": "https://witanime.you/wp-content/uploads/2022/01/WITLOGO.png",
   "typeSource": "single",
   "itemType": 1,
   "isMFn": false,
