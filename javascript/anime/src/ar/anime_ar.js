@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isMFn": false,
-  "version": "0.0.3",
+  "version": "0.0.4",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "anime/src/ar/anime_ar.js"
@@ -53,53 +53,38 @@ class DefaultExtension extends MProvider {
     return node ? (node.attr(attr) || "").trim() : "";
   }
 
-  parseAnimeCards(doc, options = {}) {
-    const { allowEpisodes = false } = options;
+  parseAnchors(doc) {
+    const anchors = doc.select("a");
+    const list = [];
+    for (const a of anchors) {
+      const href = this.absoluteUrl(a.attr("href") || "");
+      const text = a.text().trim();
+      list.push({ href, text, el: a });
+    }
+    return list;
+  }
+
+  parseAnimeListPage(doc) {
     const list = [];
     const seen = new Set();
+    const anchors = this.parseAnchors(doc);
 
-    const cards = doc.select(
-      "div.anime-card-container, div.episodes-card-container, div.episode-card, .anime-card, article, div.col-lg-2, div.col-lg-3, div.col-md-3, div.col-sm-3"
-    );
+    for (const item of anchors) {
+      const href = item.href;
+      const name = item.text;
 
-    for (const card of cards) {
-      const anchor =
-        card.selectFirst("a[title]") ||
-        card.selectFirst("h3 a") ||
-        card.selectFirst("a");
-
-      if (!anchor) continue;
-
-      const href = this.absoluteUrl(anchor.attr("href") || "");
-      if (!href) continue;
-      if (!allowEpisodes && href.includes("/episode/")) continue;
+      if (!href.includes("/anime/")) continue;
+      if (href.includes("/anime-status/")) continue;
+      if (href.includes("/anime-type/")) continue;
+      if (href.includes("/anime-season/")) continue;
+      if (href.includes("/anime-genre/")) continue;
+      if (!name || name.length < 2) continue;
       if (seen.has(href)) continue;
-
-      const img = card.selectFirst("img") || anchor.selectFirst("img");
-      const title =
-        anchor.attr("title") ||
-        (img ? img.attr("alt") : "") ||
-        this.textOf(card, ".anime-card-title") ||
-        this.textOf(card, ".anime-title") ||
-        this.textOf(card, "h3") ||
-        anchor.text().trim();
-
-      const imageUrl = img
-        ? this.absoluteUrl(
-            img.attr("data-src") ||
-            img.attr("data-lazy-src") ||
-            img.attr("data-original") ||
-            img.attr("src") ||
-            ""
-          )
-        : "";
-
-      if (!title) continue;
 
       seen.add(href);
       list.push({
-        name: title.trim(),
-        imageUrl,
+        name,
+        imageUrl: "",
         link: this.normalizeLink(href)
       });
     }
@@ -107,84 +92,76 @@ class DefaultExtension extends MProvider {
     return list;
   }
 
-  parsePinnedUpdates(doc) {
+  parseEpisodePairs(doc, headerTitle) {
+    const lines = doc.select("h3, a");
     const list = [];
     const seen = new Set();
-    const headers = doc.select("h3");
+    let inSection = false;
+    let pendingEpisode = null;
 
-    for (const header of headers) {
-      const title = header.text().trim();
-      if (title !== "حلقات الأنمي المثبتة") continue;
+    for (const node of lines) {
+      const text = node.text().trim();
+      const href = node.tagName && node.tagName() === "a"
+        ? this.absoluteUrl(node.attr("href") || "")
+        : "";
 
-      const section = header.parent();
-      if (!section) continue;
-
-      const cards = section.select(
-        "div.anime-card-container, div.episodes-card-container, div.episode-card, article, li, a"
-      );
-
-      for (const card of cards) {
-        const anchor =
-          card.tagName && card.tagName() === "a"
-            ? card
-            : card.selectFirst("a");
-
-        if (!anchor) continue;
-
-        const href = this.absoluteUrl(anchor.attr("href") || "");
-        if (!href || !href.includes("/episode/")) continue;
-        if ((anchor.attr("class") || "").includes("see-all")) continue;
-        if (seen.has(href)) continue;
-
-        const img = card.selectFirst("img") || anchor.selectFirst("img");
-        const name =
-          anchor.attr("title") ||
-          (img ? img.attr("alt") : "") ||
-          this.textOf(card, ".episode-title") ||
-          this.textOf(card, ".anime-card-title") ||
-          this.textOf(card, "h3") ||
-          anchor.text().trim();
-
-        const imageUrl = img
-          ? this.absoluteUrl(
-              img.attr("data-src") ||
-              img.attr("data-lazy-src") ||
-              img.attr("data-original") ||
-              img.attr("src") ||
-              ""
-            )
-          : "";
-
-        if (!name) continue;
-
-        seen.add(href);
-        list.push({
-          name: name.trim(),
-          imageUrl,
-          link: this.normalizeLink(href)
-        });
+      if (text === headerTitle) {
+        inSection = true;
+        pendingEpisode = null;
+        continue;
       }
 
-      if (list.length > 0) return list;
+      if (!inSection) continue;
+
+      if (text.startsWith("###")) continue;
+      if (text === "المزيد من الحلقات") continue;
+      if (
+        text === "أكثر أنميات الموسم مشاهدة" ||
+        text === "آخر الحلقات المضافة" ||
+        text === "آخر الأنميات المضافة" ||
+        text === "الأنميات المثبتة"
+      ) {
+        break;
+      }
+
+      if (href.includes("/episode/") && text.includes("الحلقة")) {
+        pendingEpisode = {
+          episodeName: text,
+          episodeLink: href
+        };
+        continue;
+      }
+
+      if (pendingEpisode && href.includes("/anime/")) {
+        if (!seen.has(pendingEpisode.episodeLink)) {
+          seen.add(pendingEpisode.episodeLink);
+          list.push({
+            name: `${text} - ${pendingEpisode.episodeName}`,
+            imageUrl: "",
+            link: this.normalizeLink(pendingEpisode.episodeLink)
+          });
+        }
+        pendingEpisode = null;
+      }
     }
 
     return list;
   }
 
-    async getPopular(page) {
+  async getPopular(page) {
     const url = page === 1
       ? `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/`
       : `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
 
     const doc = await this.request(url);
-    const list = this.parseAnimeCards(doc, { allowEpisodes: false });
+    const list = this.parseAnimeListPage(doc);
 
     return {
       list,
       hasNextPage: doc.selectFirst(`a[href*="/page/${page + 1}/"]`) != null
     };
   }
-  
+
   async getLatestUpdates(page) {
     if (page !== 1) {
       return {
@@ -194,13 +171,11 @@ class DefaultExtension extends MProvider {
     }
 
     const doc = await this.request(this.baseUrl);
-    let list = this.parsePinnedUpdates(doc);
+    let list = this.parseEpisodePairs(doc, "حلقات الأنمي المثبتة");
 
     if (list.length === 0) {
       const episodeDoc = await this.request(`${this.baseUrl}/episode/`);
-      list = this
-        .parseAnimeCards(episodeDoc, { allowEpisodes: true })
-        .filter(item => item.link.includes("/episode/"));
+      list = this.parseEpisodePairs(episodeDoc, "أرشيف حلقات الأنمي");
     }
 
     return {
@@ -212,7 +187,9 @@ class DefaultExtension extends MProvider {
   async search(query, page, filters) {
     const url = `${this.baseUrl}/?search_param=animes&s=${encodeURIComponent(query)}`;
     const doc = await this.request(url);
-    const list = this.parseAnimeCards(doc, { allowEpisodes: false });
+    const list = this.parseAnimeListPage(doc).filter(item =>
+      item.name.toLowerCase().includes(query.toLowerCase())
+    );
 
     return {
       list,
