@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isNsfw": false,
-  "version": "0.0.5",
+  "version": "0.0.6",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "javascript/anime/src/ar/anime4up.js"
@@ -18,37 +18,58 @@ class DefaultExtension extends MProvider {
     return this.source.baseUrl;
   }
 
+  // Shared headers for all requests to bypass hotlink protection
+  get headers() {
+    return { "Referer": this.baseUrl };
+  }
+
   async request(url) {
-    const res = await new Client().get(url, { "Referer": this.baseUrl });
+    const res = await new Client().get(url, this.headers);
     return new Document(res.body);
   }
 
-  // Convert an episode URL to its parent anime URL
-  // Episode URL pattern: /episode/انمي-{anime-slug}-الحلقة-{n}-مترجمة/
-  //                  or: /episode/فيلم-{anime-slug}/
-  // Anime URL:            /anime/{anime-slug}/
+  // Fix garbled Arabic text caused by encoding issues
+  // Mangayomi may pass UTF-8 bytes through Latin-1 bridge
+  fixArabic(text) {
+    if (!text) return "";
+    try {
+      // If text contains replacement chars (garbled UTF-8 read as Latin-1), re-encode
+      return decodeURIComponent(escape(text));
+    } catch (e) {
+      return text;
+    }
+  }
+
+  // Convert episode URL to parent anime URL
+  // Episode URL: /episode/انمي-{slug}-الحلقة-{n}-مترجمة/
+  //          or: /episode/فيلم-{slug}/
+  // Anime URL:   /anime/{slug}/
   episodeUrlToAnimeUrl(epUrl) {
     try {
-      // Decode percent-encoded Arabic chars
       let decoded = decodeURIComponent(epUrl);
-      // Remove trailing slash and leading path
       let slug = decoded.replace(/^.*\/episode\//, "").replace(/\/$/, "");
-      // Remove Arabic prefix: انمي- or فيلم-
-      slug = slug.replace(/^\u0627\u0646\u0645\u064a-/, "")  // انمي-
-                 .replace(/^\u0641\u064a\u0644\u0645-/, ""); // فيلم-
-      // Remove Arabic suffix: -الحلقة-{n}-مترجمة or -الاوان-{n}-... etc
-      // Pattern: -{Arabic}-{digits}-{Arabic} at end
+      // Strip Arabic prefix: انمي- or فيلم-
+      slug = slug
+        .replace(/^\u0627\u0646\u0645\u064a-/, "")
+        .replace(/^\u0641\u064a\u0644\u0645-/, "");
+      // Strip Arabic suffix: -الحلقة-{n}-... or -الاونا-{n}-...
       slug = slug.replace(/-[\u0600-\u06ff][\u0600-\u06ff\s]*-\d+[^/]*$/, "");
-      // Also handle movie suffix like -مترجم at end
+      // Strip trailing pure-Arabic word (e.g. -مترجم)
       slug = slug.replace(/-[\u0600-\u06ff][\u0600-\u06ff\s]*$/, "");
-      if (slug) {
-        return `${this.baseUrl}/anime/${slug}/`;
-      }
-    } catch(e) {}
+      if (slug) return `${this.baseUrl}/anime/${slug}/`;
+    } catch (e) {}
     return null;
   }
 
-  // Parse anime cards from the standard anime list page
+  // Build a card list item, always including Referer for images
+  makeCard(title, imageUrl, link) {
+    return {
+      name: title,
+      imageUrl: imageUrl,
+      link: link
+    };
+  }
+
   parseAnimeCards(doc) {
     const list = [];
     let cards = doc.select("div.anime-card-container, div.anime-card-poster");
@@ -58,12 +79,11 @@ class DefaultExtension extends MProvider {
     for (const card of cards) {
       const a = card.selectFirst("a");
       const link = a?.attr("href") || "";
+      if (!link || !link.includes("/anime/")) continue;
       const img = card.selectFirst("img");
       const imageUrl = img?.getSrc || img?.attr("src") || img?.attr("data-src") || img?.attr("data-lazy-src") || "";
-      const title = img?.attr("alt") || a?.text?.trim() || card.selectFirst("h3, h2, .title")?.text?.trim() || "";
-      if (link && link.includes("/anime/")) {
-        list.push({ name: title, imageUrl: imageUrl, link: link });
-      }
+      const title = img?.attr("alt") || a?.text?.trim() || card.selectFirst("h3, h2")?.text?.trim() || "";
+      if (title) list.push(this.makeCard(title, imageUrl, link));
     }
     return list;
   }
@@ -77,37 +97,23 @@ class DefaultExtension extends MProvider {
   }
 
   async getLatestUpdates(page) {
-    // Fetch the episode archive page - this is the "أخر الحلقات المضافة" section
     const url = `${this.baseUrl}/episode/page/${page}/`;
     const doc = await this.request(url);
     const list = [];
     const seenAnimeUrls = new Set();
-
-    // Episode cards: each card is a link to /episode/...
-    // We need to convert episode URLs -> anime URLs so clicking shows anime detail
     const cards = doc.select("div.anime-card-container a, div.episodes-card a, .anime-card-poster a, div[class*='col'] a[href*='/episode/']");
-
     for (const card of cards) {
       const epLink = card.attr("href") || "";
       if (!epLink || !epLink.includes("/episode/")) continue;
-
-      // Convert episode URL to anime URL
       const animeUrl = this.episodeUrlToAnimeUrl(epLink);
       if (!animeUrl || seenAnimeUrls.has(animeUrl)) continue;
       seenAnimeUrls.add(animeUrl);
-
-      // Get image and title from this card or its parent
       const img = card.selectFirst("img");
       const imageUrl = img?.getSrc || img?.attr("src") || img?.attr("data-src") || img?.attr("data-lazy-src") || "";
-      // Title: prefer the text of a heading/title element, fallback to img alt
       const titleEl = card.selectFirst("h2, h3, .anime-card-title, .title");
       const title = titleEl?.text?.trim() || img?.attr("alt") || card.text?.trim() || "";
-
-      if (title) {
-        list.push({ name: title, imageUrl: imageUrl, link: animeUrl });
-      }
+      if (title) list.push(this.makeCard(title, imageUrl, animeUrl));
     }
-
     const hasNextPage = !!doc.selectFirst("a.next, a[rel='next']");
     return { list, hasNextPage };
   }
@@ -126,8 +132,7 @@ class DefaultExtension extends MProvider {
     const title = doc.selectFirst("h1")?.text?.trim() || doc.selectFirst("h2")?.text?.trim() || "";
 
     let imageUrl = "";
-    const imgSelectors = ["img.thumbnail", "div.anime-thumbnail img", ".anime-details img", ".anime-cover img", "img[alt]"];
-    for (const sel of imgSelectors) {
+    for (const sel of ["img.thumbnail", "div.anime-thumbnail img", ".anime-details img", ".anime-cover img", "img[alt]"]){
       const img = doc.selectFirst(sel);
       if (img) {
         imageUrl = img.getSrc || img.attr("src") || img.attr("data-src") || img.attr("data-lazy-src") || "";
@@ -135,13 +140,15 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    const description = doc.selectFirst("p.anime-story, div.anime-story, .story, p.story")?.text?.trim() || "";
+    // Fix Arabic encoding in description
+    const rawDesc = doc.selectFirst("p.anime-story, div.anime-story, .story, p.story")?.text?.trim() || "";
+    const description = this.fixArabic(rawDesc);
 
     const genreEls = doc.select(".anime-genres a, .genres a, div[class*='genre'] a");
-    const genre = genreEls.map((el) => el.text.trim()).filter(Boolean);
+    const genre = genreEls.map((el) => this.fixArabic(el.text.trim())).filter(Boolean);
 
-    const statusText = doc.selectFirst(".anime-info .status, span.status, .anime-status")?.text?.trim() || "";
-    const status = this.parseStatus(statusText);
+    const rawStatus = doc.selectFirst(".anime-info .status, span.status, .anime-status")?.text?.trim() || "";
+    const status = this.parseStatus(rawStatus);
 
     const episodes = [];
     const seen = new Set();
@@ -166,34 +173,28 @@ class DefaultExtension extends MProvider {
 
   parseStatus(text) {
     if (!text) return 0;
-    if (text.includes("\u0645\u0643\u062a\u0645\u0644") || text.toLowerCase().includes("completed")) return 1;
-    if (text.includes("\u064a\u0639\u0631\u0636") || text.toLowerCase().includes("ongoing")) return 2;
+    const t = text.toLowerCase();
+    if (t.includes("\u0645\u0643\u062a\u0645\u0644") || t.includes("completed")) return 1;
+    if (t.includes("\u064a\u0639\u0631\u0636") || t.includes("ongoing")) return 2;
     return 0;
   }
 
   async getVideoList(url) {
     const doc = await this.request(url);
     const videos = [];
-
     const serverLinks = doc.select("ul.list-server-items li, .server-list li, li.server-item, li[data-id]");
     for (const server of serverLinks) {
       const dataId = server.attr("data-id") || server.attr("data-embed") || "";
       const serverName = server.selectFirst("a, span")?.text?.trim() || server.text?.trim() || "Server";
-      if (dataId) {
-        videos.push({ url: dataId, quality: serverName, originalUrl: dataId });
-      }
+      if (dataId) videos.push({ url: dataId, quality: serverName, originalUrl: dataId });
     }
-
     if (videos.length === 0) {
       const iframes = doc.select("iframe[src]");
       for (const iframe of iframes) {
         const src = iframe.attr("src") || "";
-        if (src) {
-          videos.push({ url: src, quality: "Default", originalUrl: src });
-        }
+        if (src) videos.push({ url: src, quality: "Default", originalUrl: src });
       }
     }
-
     return this.sortVideos(videos);
   }
 
@@ -208,22 +209,18 @@ class DefaultExtension extends MProvider {
     return videos;
   }
 
-  getFilterList() {
-    return [];
-  }
+  getFilterList() { return []; }
 
   getSourcePreferences() {
-    return [
-      {
-        key: "preferred_quality",
-        listPreference: {
-          title: "\u062c\u0648\u062f\u0629 \u0627\u0644\u0641\u064a\u062f\u064a\u0648 \u0627\u0644\u0645\u0641\u0636\u0644\u0629",
-          summary: "",
-          valueIndex: 0,
-          entries: ["FHD 1080p", "HD 720p", "SD 480p"],
-          entryValues: ["1080", "720", "480"]
-        }
+    return [{
+      key: "preferred_quality",
+      listPreference: {
+        title: "\u062c\u0648\u062f\u0629 \u0627\u0644\u0641\u064a\u062f\u064a\u0648 \u0627\u0644\u0645\u0641\u0636\u0644\u0629",
+        summary: "",
+        valueIndex: 0,
+        entries: ["FHD 1080p", "HD 720p", "SD 480p"],
+        entryValues: ["1080", "720", "480"]
       }
-    ];
+    }];
   }
 }
