@@ -1,15 +1,15 @@
 [{
-  "name": "Anime4Up",
+    "name": "WitAnime",
   "id": 497640624,
-  "baseUrl": "https://w1.anime4up.rest",
+    "baseUrl": "https://witanime.you",
   "lang": "ar",
   "typeSource": "single",
-  "iconUrl": "https://w1.anime4up.rest/favicon.ico",
+    "iconUrl": "https://witanime.you/wp-content/uploads/2023/05/favicon.ico",
   "dateFormat": "",
   "dateFormatLocale": "",
   "isNsfw": false,
   "hasCloudflare": false,
-  "sourceCodeUrl": "https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/ar/anime4up.js",
+  "sourceCodeUrl": "https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/anime_ar.js",
   "apiUrl": "",
     "version": "0.1.5", "isManga": false,  "itemType": 1,
   "isFullData": false,
@@ -17,5 +17,5 @@
   "additionalParams": "",
   "sourceCodeLanguage": 1,
   "notes": "",
-  "pkgPath": "javascript/anime/src/ar/anime4up.js"
+  "pkgPath": "javascript/anime/srcanime_ar.js"
 }]
