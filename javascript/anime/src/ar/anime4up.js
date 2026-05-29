@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isNsfw": false,
-  "version": "0.0.8",
+  "version": "0.0.9",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "javascript/anime/src/ar/anime4up.js"
@@ -27,7 +27,6 @@ class DefaultExtension extends MProvider {
     return new Document(res.body);
   }
 
-  // Get image URL: prefer data-src (lazy load), fallback to src
   getImageUrl(img) {
     if (!img) return "";
     return img.getSrc ||
@@ -38,39 +37,20 @@ class DefaultExtension extends MProvider {
            "";
   }
 
-  // Convert episode URL to parent anime URL
-  episodeUrlToAnimeUrl(epUrl) {
-    try {
-      let path = epUrl.replace(/^https?:\/\/[^/]+/, "");
-      let slug = path.replace(/^\/episode\//, "").replace(/\/$/, "");
-      try { slug = decodeURIComponent(slug); } catch(e) {}
-      // Strip Arabic prefix: \u0627\u0646\u0645\u064a- or \u0641\u064a\u0644\u0645-
-      slug = slug.replace(/^\u0627\u0646\u0645\u064a-/, "").replace(/^\u0641\u064a\u0644\u0645-/, "");
-      // Strip Arabic episode suffix (everything after last latin segment)
-      slug = slug.replace(/-[\u0600-\u06ff][\s\S]*$/, "");
-      if (slug) return `${this.baseUrl}/anime/${slug}/`;
-    } catch(e) {}
-    return null;
-  }
-
-  // Parse anime cards - structure: <a href=/anime/> (img) + <h2><a href=/anime/>Title</a></h2>
+  // Popular page: <a href=/anime/>(img) then <h2><a href=/anime/>Title</a></h2>
   parseAnimeCards(doc) {
     const list = [];
-    // Each card: an image-link followed by a heading with the title
-    // Select all image links pointing to /anime/
-    const imgLinks = doc.select("a[href*='/anime/']");
     const seen = new Set();
+    // Find all image links to /anime/
+    const imgLinks = doc.select("a[href*='/anime/']");
     for (const a of imgLinks) {
       const link = a.attr("href") || "";
       if (!link.includes("/anime/") || seen.has(link)) continue;
-      // Skip if this is a heading/text link (no img child)
       const img = a.selectFirst("img");
-      if (!img) continue;
+      if (!img) continue; // skip text-only heading links
       seen.add(link);
       const imageUrl = this.getImageUrl(img);
-      // Title: find the nearest heading after this card
-      // The heading is a sibling or cousin element - try parent's next sibling heading
-      // Fallback: use img alt, but prefer heading text
+      // Find heading sibling with same link for title
       const headingLink = doc.selectFirst(`h2 a[href='${link}'], h3 a[href='${link}'], h1 a[href='${link}']`);
       const title = headingLink ? headingLink.text.trim() : (img.attr("alt") || "");
       if (title) list.push({ name: title, imageUrl, link });
@@ -87,26 +67,28 @@ class DefaultExtension extends MProvider {
   }
 
   async getLatestUpdates(page) {
+    // Episode page structure:
+    // image "Title" + link[href=/episode/] (image link)
+    // heading "Title" > link[href=/anime/...] (anime link)
     const url = `${this.baseUrl}/episode/page/${page}/`;
     const doc = await this.request(url);
     const list = [];
     const seenAnimeUrls = new Set();
 
-    // Each episode card: <a href=/episode/> containing <img> + heading with title
-    const imgLinks = doc.select("a[href*='/episode/']");
-    for (const a of imgLinks) {
-      const epLink = a.attr("href") || "";
-      if (!epLink.includes("/episode/")) continue;
-      const img = a.selectFirst("img");
-      if (!img) continue;
-      const imageUrl = this.getImageUrl(img);
-      // Get title from heading inside the link
-      const titleEl = a.selectFirst("h2, h3, h1, .anime-card-title");
-      const title = titleEl ? titleEl.text.trim() : (img.attr("alt") || "");
-      if (!title) continue;
-      const animeUrl = this.episodeUrlToAnimeUrl(epLink);
-      if (!animeUrl || seenAnimeUrls.has(animeUrl)) continue;
+    // Strategy: find all headings on the episode page that link to /anime/
+    // Each heading has: <h2><a href=/anime/slug/>Title</a></h2>
+    // The image is the previous sibling's image
+    const headings = doc.select("h2 a[href*='/anime/'], h3 a[href*='/anime/']");
+    for (const headingLink of headings) {
+      const animeUrl = headingLink.attr("href") || "";
+      if (!animeUrl.includes("/anime/") || seenAnimeUrls.has(animeUrl)) continue;
       seenAnimeUrls.add(animeUrl);
+      const title = headingLink.text.trim();
+      if (!title) continue;
+      // Find the image: it has the same alt text as the title
+      // Select any img with matching alt
+      const img = doc.selectFirst(`img[alt='${title.replace(/'/g, "\\'").replace(/"/g, '\\"')}']`);
+      const imageUrl = img ? this.getImageUrl(img) : "";
       list.push({ name: title, imageUrl, link: animeUrl });
     }
 
