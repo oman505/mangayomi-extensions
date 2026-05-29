@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isMFn": false,
-  "version": "0.0.5",
+  "version": "0.0.2",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "anime/src/ar/anime_ar.js"
@@ -40,38 +40,65 @@ class DefaultExtension extends MProvider {
   }
 
   normalizeLink(url) {
-    return this.absoluteUrl(url).replace(this.baseUrl, "");
+    const full = this.absoluteUrl(url);
+    return full.replace(this.baseUrl, "");
   }
 
-  textOf(el, selector) {
-    const node = el.selectFirst(selector);
-    return node ? node.text().trim() : "";
-  }
+  parseAnimeCards(doc, options = {}) {
+    const { allowEpisodes = false } = options;
+    const list = [];
+    const seen = new Set();
 
-  attrOf(el, selector, attr) {
-    const node = el.selectFirst(selector);
-    return node ? (node.attr(attr) || "").trim() : "";
-  }
+    const selectors = [
+      "div.anime-card-container",
+      "div.col-lg-2",
+      "div.col-md-3",
+      "div.col-sm-3",
+      "article",
+      ".anime-card",
+      ".episodes-card-container",
+      ".episode-card"
+    ];
 
-  cleanName(name) {
-    return (name || "")
-      .replace(/\s+/g, " ")
-      .replace(/^#+\s*/, "")
-      .trim();
-  }
+    let cards = [];
+    for (const selector of selectors) {
+      const found = doc.select(selector);
+      if (found && found.length > 0) {
+        cards = found;
+        break;
+      }
+    }
 
-  parseAllAnchors(doc) {
-    const anchors = doc.select("a");
-    const results = [];
+    for (const card of cards) {
+      const anchor =
+        card.selectFirst("a") ||
+        card.selectFirst("h3 a") ||
+        card.selectFirst(".anime-title a");
 
-    for (const a of anchors) {
-      const href = this.absoluteUrl(a.attr("href") || "");
-      const text = this.cleanName(a.text());
-      const title = this.cleanName(a.attr("title") || "");
-      const img = a.selectFirst("img");
+      if (!anchor) continue;
+
+      const rawHref = anchor.attr("href") || "";
+      if (!rawHref) continue;
+
+      const href = this.absoluteUrl(rawHref);
+      if (!allowEpisodes && href.includes("/episode/")) continue;
+      if (seen.has(href)) continue;
+
+      const img =
+        card.selectFirst("img") ||
+        anchor.selectFirst("img");
+
+      const title =
+        anchor.attr("title") ||
+        (img ? img.attr("alt") : "") ||
+        (card.selectFirst(".anime-card-title") ? card.selectFirst(".anime-card-title").text() : "") ||
+        (card.selectFirst(".anime-title") ? card.selectFirst(".anime-title").text() : "") ||
+        (card.selectFirst("h3") ? card.selectFirst("h3").text() : "") ||
+        anchor.text() ||
+        card.text();
 
       const imageUrl = img
-        ? this.absoluteUrl(
+        ? (
             img.attr("data-src") ||
             img.attr("data-lazy-src") ||
             img.attr("data-original") ||
@@ -80,91 +107,13 @@ class DefaultExtension extends MProvider {
           )
         : "";
 
-      results.push({
-        href,
-        text,
-        title,
-        imageUrl,
-        className: a.attr("class") || ""
-      });
-    }
-
-    return results;
-  }
-
-  parsePopularFromAnimePage(doc) {
-    const list = [];
-    const seen = new Set();
-    const anchors = this.parseAllAnchors(doc);
-
-    for (const item of anchors) {
-      const href = item.href;
-      const name = item.title || item.text;
-
-      if (!href) continue;
-      if (!href.includes("/anime/")) continue;
-      if (href.includes("/anime-status/")) continue;
-      if (href.includes("/anime-type/")) continue;
-      if (href.includes("/anime-season/")) continue;
-      if (href.includes("/anime-genre/")) continue;
-      if (href.includes("/episode/")) continue;
-      if (!name || name.length < 2) continue;
-      if (seen.has(href)) continue;
+      if (!title || title.trim() === "") continue;
 
       seen.add(href);
       list.push({
-        name,
-        imageUrl: item.imageUrl,
+        name: title.trim(),
+        imageUrl: this.absoluteUrl(imageUrl.trim()),
         link: this.normalizeLink(href)
-      });
-    }
-
-    return list;
-  }
-
-  parseLatestFromHome(doc) {
-    const list = [];
-    const seen = new Set();
-    const anchors = this.parseAllAnchors(doc);
-
-    for (const item of anchors) {
-      if (!item.href) continue;
-      if (!item.href.includes("/episode/")) continue;
-      if (item.className.includes("see-all")) continue;
-
-      const name = item.title || item.text;
-      if (!name || name.length < 2) continue;
-      if (seen.has(item.href)) continue;
-
-      seen.add(item.href);
-      list.push({
-        name,
-        imageUrl: item.imageUrl,
-        link: this.normalizeLink(item.href)
-      });
-    }
-
-    return list;
-  }
-
-  parseLatestFromEpisodePage(doc) {
-    const list = [];
-    const seen = new Set();
-    const anchors = this.parseAllAnchors(doc);
-
-    for (const item of anchors) {
-      if (!item.href) continue;
-      if (!item.href.includes("/episode/")) continue;
-
-      const name = item.title || item.text;
-      if (!name || name.length < 2) continue;
-      if (seen.has(item.href)) continue;
-
-      seen.add(item.href);
-      list.push({
-        name,
-        imageUrl: item.imageUrl,
-        link: this.normalizeLink(item.href)
       });
     }
 
@@ -177,42 +126,40 @@ class DefaultExtension extends MProvider {
       : `${this.baseUrl}/%D9%82%D8%A7%D8%A6%D9%85%D8%A9-%D8%A7%D9%84%D8%A7%D9%86%D9%85%D9%8A/page/${page}/`;
 
     const doc = await this.request(url);
-    const list = this.parsePopularFromAnimePage(doc);
+    const list = this.parseAnimeCards(doc, { allowEpisodes: false });
+
+    const hasNextPage =
+      doc.selectFirst(`a[href*="/page/${page + 1}/"]`) != null ||
+      list.length > 0;
 
     return {
       list,
-      hasNextPage: doc.selectFirst(`a[href*="/page/${page + 1}/"]`) != null
+      hasNextPage
     };
   }
 
   async getLatestUpdates(page) {
-    if (page !== 1) {
-      return {
-        list: [],
-        hasNextPage: false
-      };
-    }
+    const url = page === 1
+      ? `${this.baseUrl}/episode/`
+      : `${this.baseUrl}/episode/page/${page}/`;
 
-    const homeDoc = await this.request(this.baseUrl);
-    let list = this.parseLatestFromHome(homeDoc);
+    const doc = await this.request(url);
+    const list = this.parseAnimeCards(doc, { allowEpisodes: true });
 
-    if (list.length === 0) {
-      const episodeDoc = await this.request(`${this.baseUrl}/episode/`);
-      list = this.parseLatestFromEpisodePage(episodeDoc);
-    }
+    const hasNextPage =
+      doc.selectFirst(`a[href*="/episode/page/${page + 1}/"]`) != null ||
+      list.length > 0;
 
     return {
       list,
-      hasNextPage: false
+      hasNextPage
     };
   }
 
   async search(query, page, filters) {
     const url = `${this.baseUrl}/?search_param=animes&s=${encodeURIComponent(query)}`;
     const doc = await this.request(url);
-    const list = this.parsePopularFromAnimePage(doc).filter(item =>
-      item.name.toLowerCase().includes(query.toLowerCase())
-    );
+    const list = this.parseAnimeCards(doc, { allowEpisodes: false });
 
     return {
       list,
@@ -223,25 +170,28 @@ class DefaultExtension extends MProvider {
   async getDetail(url) {
     const doc = await this.request(this.absoluteUrl(url));
 
-    const title =
-      this.textOf(doc, "h1") ||
-      this.textOf(doc, ".anime-details-title") ||
-      this.textOf(doc, "title");
+    const titleNode =
+      doc.selectFirst("h1") ||
+      doc.selectFirst("title");
 
-    const image =
-      this.attrOf(doc, ".anime-thumb img", "src") ||
-      this.attrOf(doc, ".anime-thumb img", "data-src") ||
-      this.attrOf(doc, "img", "src");
+    const imageNode =
+      doc.selectFirst("img");
 
-    const description =
-      this.textOf(doc, ".anime-story") ||
-      this.textOf(doc, ".story") ||
-      this.textOf(doc, ".description");
+    const descNode =
+      doc.selectFirst(".anime-story") ||
+      doc.selectFirst(".story") ||
+      doc.selectFirst(".description");
+
+    const title = titleNode ? titleNode.text() : "";
+    const image = imageNode
+      ? (imageNode.attr("src") || imageNode.attr("data-src") || "")
+      : "";
+    const description = descNode ? descNode.text() : "";
 
     return {
-      name: title,
+      name: title.trim(),
       imageUrl: this.absoluteUrl(image),
-      description,
+      description: description.trim(),
       link: url
     };
   }
