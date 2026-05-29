@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isNsfw": false,
-  "version": "0.0.4",
+  "version": "0.0.5",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "javascript/anime/src/ar/anime4up.js"
@@ -23,21 +23,42 @@ class DefaultExtension extends MProvider {
     return new Document(res.body);
   }
 
-  // Parse anime cards from listing pages
-  // Works for: /%d9%82%d8%a7%d8%a6%d9%85%d8%a9-%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a/ and /episode/
+  // Convert an episode URL to its parent anime URL
+  // Episode URL pattern: /episode/انمي-{anime-slug}-الحلقة-{n}-مترجمة/
+  //                  or: /episode/فيلم-{anime-slug}/
+  // Anime URL:            /anime/{anime-slug}/
+  episodeUrlToAnimeUrl(epUrl) {
+    try {
+      // Decode percent-encoded Arabic chars
+      let decoded = decodeURIComponent(epUrl);
+      // Remove trailing slash and leading path
+      let slug = decoded.replace(/^.*\/episode\//, "").replace(/\/$/, "");
+      // Remove Arabic prefix: انمي- or فيلم-
+      slug = slug.replace(/^\u0627\u0646\u0645\u064a-/, "")  // انمي-
+                 .replace(/^\u0641\u064a\u0644\u0645-/, ""); // فيلم-
+      // Remove Arabic suffix: -الحلقة-{n}-مترجمة or -الاوان-{n}-... etc
+      // Pattern: -{Arabic}-{digits}-{Arabic} at end
+      slug = slug.replace(/-[\u0600-\u06ff][\u0600-\u06ff\s]*-\d+[^/]*$/, "");
+      // Also handle movie suffix like -مترجم at end
+      slug = slug.replace(/-[\u0600-\u06ff][\u0600-\u06ff\s]*$/, "");
+      if (slug) {
+        return `${this.baseUrl}/anime/${slug}/`;
+      }
+    } catch(e) {}
+    return null;
+  }
+
+  // Parse anime cards from the standard anime list page
   parseAnimeCards(doc) {
     const list = [];
-    // Try standard anime list card structure first
     let cards = doc.select("div.anime-card-container, div.anime-card-poster");
     if (cards.length === 0) {
-      // Fallback: any article or div with a child link + img
       cards = doc.select("div.col-lg-2, div.col-md-3, div.col-sm-4");
     }
     for (const card of cards) {
       const a = card.selectFirst("a");
       const link = a?.attr("href") || "";
       const img = card.selectFirst("img");
-      // Use getSrc to handle lazy-loaded images (data-src, data-lazy-src, etc.)
       const imageUrl = img?.getSrc || img?.attr("src") || img?.attr("data-src") || img?.attr("data-lazy-src") || "";
       const title = img?.attr("alt") || a?.text?.trim() || card.selectFirst("h3, h2, .title")?.text?.trim() || "";
       if (link && link.includes("/anime/")) {
@@ -48,9 +69,7 @@ class DefaultExtension extends MProvider {
   }
 
   async getPopular(page) {
-    // Use the confirmed working anime list URL
-    const encodedPath = encodeURIComponent("\u0642\u0627\u0626\u0645\u0629-\u0627\u0644\u0627\u0646\u0645\u064a");
-    const url = `${this.baseUrl}/${encodedPath}/page/${page}/`;
+    const url = `${this.baseUrl}/%d9%82%d8%a7%d8%a6%d9%85%d8%a9-%d8%a7%d9%84%d8%a7%d9%86%d9%85%d9%8a/page/${page}/`;
     const doc = await this.request(url);
     const list = this.parseAnimeCards(doc);
     const hasNextPage = !!doc.selectFirst("a.next, a[rel='next']");
@@ -58,25 +77,37 @@ class DefaultExtension extends MProvider {
   }
 
   async getLatestUpdates(page) {
-    // Latest episodes archive
+    // Fetch the episode archive page - this is the "أخر الحلقات المضافة" section
     const url = `${this.baseUrl}/episode/page/${page}/`;
     const doc = await this.request(url);
     const list = [];
-    // Episode cards link to /episode/ paths; get unique anime links
-    const seen = new Set();
-    const cards = doc.select("div.anime-card-container, div.anime-card-poster, div.col-lg-2, div.col-md-3");
+    const seenAnimeUrls = new Set();
+
+    // Episode cards: each card is a link to /episode/...
+    // We need to convert episode URLs -> anime URLs so clicking shows anime detail
+    const cards = doc.select("div.anime-card-container a, div.episodes-card a, .anime-card-poster a, div[class*='col'] a[href*='/episode/']");
+
     for (const card of cards) {
-      const a = card.selectFirst("a");
-      const link = a?.attr("href") || "";
-      if (!link || seen.has(link)) continue;
-      seen.add(link);
+      const epLink = card.attr("href") || "";
+      if (!epLink || !epLink.includes("/episode/")) continue;
+
+      // Convert episode URL to anime URL
+      const animeUrl = this.episodeUrlToAnimeUrl(epLink);
+      if (!animeUrl || seenAnimeUrls.has(animeUrl)) continue;
+      seenAnimeUrls.add(animeUrl);
+
+      // Get image and title from this card or its parent
       const img = card.selectFirst("img");
       const imageUrl = img?.getSrc || img?.attr("src") || img?.attr("data-src") || img?.attr("data-lazy-src") || "";
-      const title = img?.attr("alt") || a?.text?.trim() || card.selectFirst("h3, h2")?.text?.trim() || "";
-      if (link && title) {
-        list.push({ name: title, imageUrl: imageUrl, link: link });
+      // Title: prefer the text of a heading/title element, fallback to img alt
+      const titleEl = card.selectFirst("h2, h3, .anime-card-title, .title");
+      const title = titleEl?.text?.trim() || img?.attr("alt") || card.text?.trim() || "";
+
+      if (title) {
+        list.push({ name: title, imageUrl: imageUrl, link: animeUrl });
       }
     }
+
     const hasNextPage = !!doc.selectFirst("a.next, a[rel='next']");
     return { list, hasNextPage };
   }
@@ -92,12 +123,10 @@ class DefaultExtension extends MProvider {
   async getDetail(url) {
     const doc = await this.request(url);
 
-    // Title
     const title = doc.selectFirst("h1")?.text?.trim() || doc.selectFirst("h2")?.text?.trim() || "";
 
-    // Cover image - try multiple selectors, use getSrc for lazy loading
     let imageUrl = "";
-    const imgSelectors = ["img.thumbnail", "div.anime-thumbnail img", ".anime-details img", ".anime-cover img", "img[alt]" ];
+    const imgSelectors = ["img.thumbnail", "div.anime-thumbnail img", ".anime-details img", ".anime-cover img", "img[alt]"];
     for (const sel of imgSelectors) {
       const img = doc.selectFirst(sel);
       if (img) {
@@ -106,18 +135,14 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Description
     const description = doc.selectFirst("p.anime-story, div.anime-story, .story, p.story")?.text?.trim() || "";
 
-    // Genre
     const genreEls = doc.select(".anime-genres a, .genres a, div[class*='genre'] a");
     const genre = genreEls.map((el) => el.text.trim()).filter(Boolean);
 
-    // Status
     const statusText = doc.selectFirst(".anime-info .status, span.status, .anime-status")?.text?.trim() || "";
     const status = this.parseStatus(statusText);
 
-    // Episodes from #episodesList
     const episodes = [];
     const seen = new Set();
     const epLinks = doc.select("#episodesList a[href]");
@@ -150,7 +175,6 @@ class DefaultExtension extends MProvider {
     const doc = await this.request(url);
     const videos = [];
 
-    // Find server list items with data-id attribute
     const serverLinks = doc.select("ul.list-server-items li, .server-list li, li.server-item, li[data-id]");
     for (const server of serverLinks) {
       const dataId = server.attr("data-id") || server.attr("data-embed") || "";
@@ -160,7 +184,6 @@ class DefaultExtension extends MProvider {
       }
     }
 
-    // Fallback: direct iframes
     if (videos.length === 0) {
       const iframes = doc.select("iframe[src]");
       for (const iframe of iframes) {
