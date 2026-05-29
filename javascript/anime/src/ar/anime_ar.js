@@ -1,5 +1,5 @@
-// WitAnime Mangayomi Extension v0.0.1
-// Arabic anime streaming site
+// Arabic Anime Sources - Multi-site extension v0.0.1
+// Includes: WitAnime
 
 const mangayomiSources = [{
   "name": "WitAnime",
@@ -13,7 +13,7 @@ const mangayomiSources = [{
   "version": "0.0.1",
   "dateFormat": "",
   "dateFormatLocale": "",
-  "pkgPath": "anime/src/ar/witanime.js"
+  "pkgPath": "anime/src/anime_ar.js"
 }];
 
 class DefaultExtension extends MProvider {
