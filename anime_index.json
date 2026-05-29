@@ -1,1 +1,23 @@
-[{"name":"Anime4Up","id":497640624,"baseUrl":"https://w1.anime4up.rest","lang":"ar","typeSource":"single","iconUrl":"https://w1.anime4up.rest/favicon.ico","dateFormat":"","dateFormatLocale":"","isNsfw":false,"hasCloudflare":false,"sourceCodeUrl":"https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/ar/anime4up.js","apiUrl":"","version":"0.0.5","isManga":false,"itemType":1,"isFullData":false,"appMinVerReq":"0.5.0","additionalParams":"","sourceCodeLanguage":1,"notes":"","pkgPath":"javascript/anime/src/ar/anime4up.js"}]
+[{
+  "name": "Anime4Up",
+  "id": 497640624,
+  "baseUrl": "https://w1.anime4up.rest",
+  "lang": "ar",
+  "typeSource": "single",
+  "iconUrl": "https://w1.anime4up.rest/favicon.ico",
+  "dateFormat": "",
+  "dateFormatLocale": "",
+  "isNsfw": false,
+  "hasCloudflare": false,
+  "sourceCodeUrl": "https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/ar/anime4up.js",
+  "apiUrl": "",
+  "version": "0.0.7",
+  "isManga": false,
+  "itemType": 1,
+  "isFullData": false,
+  "appMinVerReq": "0.5.0",
+  "additionalParams": "",
+  "sourceCodeLanguage": 1,
+  "notes": "",
+  "pkgPath": "javascript/anime/src/ar/anime4up.js"
+}]
