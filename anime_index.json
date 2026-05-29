@@ -9,7 +9,7 @@
   "dateFormatLocale": "",
   "isNsfw": false,
   "hasCloudflare": false,
-  "sourceCodeUrl": "https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/anime_ar.js",
+  "sourceCodeUrl": "https://raw.githubusercontent.com/oman505/mangayomi-extensions/main/javascript/anime/src/ar/anime_ar.js",
   "apiUrl": "",
     "version": "0.0.1", "isManga": false,  "itemType": 1,
   "isFullData": false,
