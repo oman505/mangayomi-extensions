@@ -7,7 +7,7 @@ const mangayomiSources = [{
   "typeSource": "single",
   "itemType": 1,
   "isMFn": false,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "dateFormat": "",
   "dateFormatLocale": "",
   "pkgPath": "anime/src/ar/anime_ar.js"
@@ -110,14 +110,17 @@ class DefaultExtension extends MProvider {
   parsePinnedUpdates(doc) {
     const list = [];
     const seen = new Set();
+    const headers = doc.select("h3");
 
-    const sectionCandidates = doc.select("section, div, main");
-    for (const section of sectionCandidates) {
-      const sectionText = section.text();
-      if (!sectionText || !sectionText.includes("حلقات الأنمي المثبتة")) continue;
+    for (const header of headers) {
+      const title = header.text().trim();
+      if (title !== "حلقات الأنمي المثبتة") continue;
+
+      const section = header.parent();
+      if (!section) continue;
 
       const cards = section.select(
-        "a, article, div.anime-card-container, div.episodes-card-container, div.episode-card, li"
+        "div.anime-card-container, div.episodes-card-container, div.episode-card, article, li, a"
       );
 
       for (const card of cards) {
@@ -130,14 +133,16 @@ class DefaultExtension extends MProvider {
 
         const href = this.absoluteUrl(anchor.attr("href") || "");
         if (!href || !href.includes("/episode/")) continue;
+        if ((anchor.attr("class") || "").includes("see-all")) continue;
         if (seen.has(href)) continue;
 
         const img = card.selectFirst("img") || anchor.selectFirst("img");
-        const title =
+        const name =
           anchor.attr("title") ||
           (img ? img.attr("alt") : "") ||
-          this.textOf(card, "h3") ||
           this.textOf(card, ".episode-title") ||
+          this.textOf(card, ".anime-card-title") ||
+          this.textOf(card, "h3") ||
           anchor.text().trim();
 
         const imageUrl = img
@@ -150,11 +155,11 @@ class DefaultExtension extends MProvider {
             )
           : "";
 
-        if (!title) continue;
+        if (!name) continue;
 
         seen.add(href);
         list.push({
-          name: title.trim(),
+          name: name.trim(),
           imageUrl,
           link: this.normalizeLink(href)
         });
@@ -192,8 +197,9 @@ class DefaultExtension extends MProvider {
     let list = this.parsePinnedUpdates(doc);
 
     if (list.length === 0) {
+      const episodeDoc = await this.request(`${this.baseUrl}/episode/`);
       list = this
-        .parseAnimeCards(doc, { allowEpisodes: true })
+        .parseAnimeCards(episodeDoc, { allowEpisodes: true })
         .filter(item => item.link.includes("/episode/"));
     }
 
